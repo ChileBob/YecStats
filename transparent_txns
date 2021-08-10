@@ -1,0 +1,74 @@
+#!/usr/bin/perl
+#
+# MIT License (ChileBob)
+#
+# Zcash : zs1a7qnkg8hr74ujj08jhjcdfs7s62yathqlyn5vd2e8ww96ln28m3t2jkxun5fp7hxjntcg8ccuvs
+# Ycash : ys17fsj64ydl93net807xr00ujz2lnrf22cjf4430vvz69vpaat8t3hrdjmkvj7thrw4fdaz7l0pns
+
+use Data::Dumper;
+use JSON;
+
+my $node_client = 'ycash-cli';								# ycash client
+
+my $block_height = 0;									# start block
+
+my $blockchaininfo = node_cli('getblockchaininfo');
+
+while ( $block_height < 1000000) {
+       
+	my $block = node_cli("getblock $block_height 2");
+
+	foreach my $tx ( @{$block->{'tx'} } ) {
+
+		if ($tx->{'vin'}[0]->{'coinbase'}) {					# coinbase
+
+			foreach my $vout (@{$tx->{'vout'}}) {
+				print "$block_height\t$vout->{'scriptPubKey'}->{'addresses'}[0]\t$vout->{'value'}\n"; 
+			}
+		}
+		else {									# non coinbase
+
+			foreach my $vin (@{$tx->{'vin'}}) {				# transparent inputs
+				if ($vin->{'value'}) {
+					print "$block_height\t$vin->{'address'}\t\-$vin->{'value'}\n"; 
+				}
+			}
+
+			foreach my $vout (@{$tx->{'vout'}}) {				# transparent outputs
+				print "$block_height\t$vout->{'scriptPubKey'}->{'addresses'}[0]\t$vout->{'value'}\n"; 
+			}
+		}
+	}
+
+	$block_height++;
+}
+
+# Safely parse JSON string
+#
+sub read_json {
+
+        my ($raw) = @_;
+
+        eval { decode_json($raw) };							# eval first, bad JSON kills puppies
+
+        if (!$@) {                             					
+                return(decode_json($raw));
+        }
+}
+
+
+# query node client, return JSON 
+#
+sub node_cli {
+
+	my ($command, $data) = @_;
+
+	my $response = `$node_client $command $data 2>/dev/null`;			# every time you use backticks a puppy dies :-(
+
+	my $json = read_json($response);						# bad JSON kills puppies too
+
+	if ($json) {
+		return($json);
+	}
+}
+
