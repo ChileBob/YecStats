@@ -10,13 +10,16 @@ use JSON;
 
 my %richlist;										# transparent address & balance
 
+$richlist{'SPROUT'} = 0;
+$richlist{'SAPLING'} = 0;
+
 my $node_client = 'ycash-cli';								# ycash client
 
-my $block_height = 0;									# start block
+my $block_height = $ARGV[0];								# start block
 
 my $blockchaininfo = node_cli('getblockchaininfo');
 
-while ( $block_height < 1000) {
+while ( $block_height < $ARGV[1]) {							# stop at ycash fork block
        
 	my $block = node_cli("getblock $block_height 2");
 
@@ -50,6 +53,14 @@ while ( $block_height < 1000) {
 
 				$richlist{$address} += $vout->{'value'};		# update balance
 			}
+
+			foreach my $vjoinsplit (@{$tx->{'vjoinsplit'}}) {		# sprout pool
+
+				$richlist{'SPROUT'} += $vjoinsplit->{'vpub_old'};	# deshield
+				$richlist{'SPROUT'} -= $vjoinsplit->{'vpub_new'};	# shield
+			}
+
+			$richlist{'SAPLING'} += $tx->{'valueBalance'};			# sapling pool
 		}
 	}
 
@@ -58,9 +69,9 @@ while ( $block_height < 1000) {
 
 foreach my $addr (sort {$richlist{$b} <=> $richlist{$a}} keys %richlist) {		# print the richlist
 
-	if ($richlist{$addr} > 0) {							# ignore empty accounts
+	if ( ($richlist{$addr} > 0) || ($addr eq 'SAPLING') || ($addr eq 'SPROUT')) {							# ignore empty accounts
 
-		print "$addr\t$richlist{$addr}\n";
+		print "$addr\t" . sprintf("%.8f",$richlist{$addr}) . "\n";
 
 	}
 }
