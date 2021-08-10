@@ -8,13 +8,15 @@
 use Data::Dumper;
 use JSON;
 
+my %richlist;										# transparent address & balance
+
 my $node_client = 'ycash-cli';								# ycash client
 
 my $block_height = 0;									# start block
 
 my $blockchaininfo = node_cli('getblockchaininfo');
 
-while ( $block_height < 1000000) {
+while ( $block_height < 1000) {
        
 	my $block = node_cli("getblock $block_height 2");
 
@@ -23,25 +25,48 @@ while ( $block_height < 1000000) {
 		if ($tx->{'vin'}[0]->{'coinbase'}) {					# coinbase
 
 			foreach my $vout (@{$tx->{'vout'}}) {
-				print "$block_height\t$vout->{'scriptPubKey'}->{'addresses'}[0]\t$vout->{'value'}\n"; 
+
+				my $address = $vout->{'scriptPubKey'}->{'addresses'}[0];
+
+				$richlist{$address} += $vout->{'value'};		# update balance
+
 			}
 		}
 		else {									# non coinbase
 
 			foreach my $vin (@{$tx->{'vin'}}) {				# transparent inputs
-				if ($vin->{'value'}) {
-					print "$block_height\t$vin->{'address'}\t\-$vin->{'value'}\n"; 
+
+				if ($vin->{'txid'} ) {					# input is from different txn
+
+					my ($address, $value) = get_output($vin->{'txid'}, $vin->{'vout'});
+
+					$richlist{$address} -= $value;		# update balance
 				}
 			}
 
 			foreach my $vout (@{$tx->{'vout'}}) {				# transparent outputs
-				print "$block_height\t$vout->{'scriptPubKey'}->{'addresses'}[0]\t$vout->{'value'}\n"; 
+
+				my $address = $vout->{'scriptPubKey'}->{'addresses'}[0];
+
+				$richlist{$address} += $vout->{'value'};		# update balance
 			}
 		}
 	}
 
 	$block_height++;
 }
+
+foreach my $addr (sort {$richlist{$b} <=> $richlist{$a}} keys %richlist) {		# print the richlist
+
+	if ($richlist{$addr} > 0) {							# ignore empty accounts
+
+		print "$addr\t$richlist{$addr}\n";
+
+	}
+}
+
+exit;
+
 
 # Safely parse JSON string
 #
@@ -70,5 +95,18 @@ sub node_cli {
 	if ($json) {
 		return($json);
 	}
+}
+
+
+# return address & value of a transparent output
+#
+sub get_output {
+
+	my ($txid, $output) = @_;
+
+	my $txn_raw = `$node_client getrawtransaction $txid`;				# not a JSON response, raw hexstring
+	my $txn_decoded = node_cli("decoderawtransaction $txn_raw");			# decode hexstring transaction
+
+	return ($txn_decoded->{'vout'}[$output]->{'scriptPubKey'}->{'addresses'}[0], $txn_decoded->{'vout'}[$output]->{'value'});
 }
 
