@@ -19,7 +19,7 @@ my $block_height = $ARGV[0];								# start block
 
 my $blockchaininfo = node_cli('getblockchaininfo');
 
-while ( $block_height < $ARGV[1]) {							# stop at ycash fork block
+while ( $block_height <= $ARGV[1]) {							# stop at ycash fork block
        
 	my $block = node_cli("getblock $block_height 2");
 
