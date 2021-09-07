@@ -1,0 +1,166 @@
+#! /usr/bin/perl
+#
+# MIT License (ChileBob)
+#
+# Zcash : zs1a7qnkg8hr74ujj08jhjcdfs7s62yathqlyn5vd2e8ww96ln28m3t2jkxun5fp7hxjntcg8ccuvs
+# Ycash : ys17fsj64ydl93net807xr00ujz2lnrf22cjf4430vvz69vpaat8t3hrdjmkvj7thrw4fdaz7l0pns
+# MIT License (boyfromcave - Ycash Contributor)
+
+use Data::Dumper;
+use JSON;
+use DateTime;
+
+# name tab separated based on first and second args (blocks)
+my $des = 'records_' . "$ARGV[0]" . "_" . "$ARGV[1]" . ".tsv";
+
+my $node_client = 'ycash-cli';								# ycash client
+
+my $block_height = $ARGV[0];								# start block
+
+#my $blockchaininfo = node_cli('getblockchaininfo');
+
+# open file for writing
+open(DES, '>',$des) or die $!;
+
+while ( $block_height <= $ARGV[1]) {							# loop through blocks from arg0 to arg1
+       
+	my $block = node_cli("getblock $block_height 2");                               # verbose getblock
+        my $block_time = $block->{'time'};
+	#print "$block_time\n";
+	my $block_utc =  DateTime->from_epoch(epoch=>$block_time)->set_time_zone('UTC')->strftime("%Y-%m-%d %H:%M:%S");#%F %T %Z");
+	#print "$block_utc\n";
+	foreach my $tx ( @{$block->{'tx'} } ) {
+
+		if ($tx->{'vin'}[0]->{'coinbase'}) {					# coinbase
+
+			foreach my $vout (@{$tx->{'vout'}}) {
+
+				my $address = $vout->{'scriptPubKey'}->{'addresses'}[0];
+				if ($address eq ""){
+                                        $address = "Unknown";
+                                }
+				
+                                print DES "$block_height\t$tx->{'txid'}\t$tx->{'txid'}\t$vout->{'n'}\t$block_time\tCOINBASE\t$address\t$block_utc\t" . sprintf("%.8f",$vout->{'value'}) . "\n";
+			}
+		}
+		else {									# non coinbase
+
+			foreach my $vin (@{$tx->{'vin'}}) {				# transparent inputs
+
+				if ($vin->{'txid'} ) {					# input is from different txn
+					if($vin->{'address'}){
+					my $address = $vin->{'address'};
+					my $value = $vin->{'value'};
+					print DES "$block_height\t$tx->{'txid'}\t$vin->{'txid'}\t$vin->{'vout'}\t$block_time\tT-INPUTS\t$address\t$block_utc\t" . sprintf("%.8f",$value*-1) . "\n";
+				}
+				else {
+					#print "address not present";
+					my ($address, $value) = get_output($vin->{'txid'}, $vin->{'vout'});
+					print DES "$block_height\t$tx->{'txid'}\t$vin->{'txid'}\t$vin->{'vout'}\t$block_time\tT-INPUTS\t$address\t$block_utc\t" . sprintf("%.8f",$value*-1) . "\n";
+				}
+
+				}
+			}
+
+			foreach my $vout (@{$tx->{'vout'}}) {				# transparent outputs
+
+				my $address = $vout->{'scriptPubKey'}->{'addresses'}[0];
+				if ($address eq ""){ 
+					$address = get_p2sh($vout->{'scriptPubKey'}->{'hex'});
+				}
+				if ($address eq ""){
+                                        $address = "Unknown";
+				}
+				
+				print DES "$block_height\t$tx->{'txid'}\t$tx->{'txid'}\t$vout->{'n'}\t$block_time\tT-OUTPUT\t$address\t$block_utc\t" . sprintf("%.8f",$vout->{'value'}) . "\n";
+			}
+
+			foreach my $vjoinsplit (@{$tx->{'vjoinsplit'}}) {		# sprout pool
+
+											# shield
+				if ($vjoinsplit->{'vpub_old'} ne 0) {
+				print DES "$block_height\t$tx->{'txid'}\t$tx->{'txid'}\t-1\t$block_time\tSHIELDIN\t***************SPROUT**************\t$block_utc\t" . sprintf("%.8f",$vjoinsplit->{'vpub_old'}) . "\n";
+			}
+				if ($vjoinsplit->{'vpub_new'} ne 0) {
+											# deshield
+				print DES "$block_height\t$tx->{'txid'}\t$tx->{'txid'}\t-1\t$block_time\tDESHIELD\t***************SPROUT**************\t$block_utc\t" . sprintf("%.8f",$vjoinsplit->{'vpub_new'}*-1) . "\n";
+			}
+			}
+
+											# sapling pool
+			my $debit;
+
+		       	if ($tx->{'valueBalance'}>0){
+			       $debit = 'DESHIELD';
+				print DES "$block_height\t$tx->{'txid'}\t$tx->{'txid'}\t-1\t$block_time\t$debit\t**************SAPLING**************\t$block_utc\t" . sprintf("%.8f",$tx->{'valueBalance'}*-1) . "\n";
+		       }elsif($tx->{'valueBalance'}<0){
+				$debit = 'SHIELDIN';
+				print DES "$block_height\t$tx->{'txid'}\t$tx->{'txid'}\t-1\t$block_time\t$debit\t**************SAPLING**************\t$block_utc\t" . sprintf("%.8f",$tx->{'valueBalance'}*-1) . "\n";
+			}		
+
+		}
+	}
+
+	$block_height++;
+}
+
+close(DES);
+
+exit;
+
+
+# Safely parse JSON string
+#
+sub read_json {
+
+        my ($raw) = @_;
+
+        eval { decode_json($raw) };							# eval first, bad JSON kills puppies
+
+        if (!$@) {                             					
+                return(decode_json($raw));
+        }
+}
+
+
+# query node client, return JSON 
+#
+sub node_cli {
+
+	my ($command, $data) = @_;
+
+	my $response = `$node_client $command $data 2>/dev/null`;			# every time you use backticks a puppy dies :-(
+
+	my $json = read_json($response);						# bad JSON kills puppies too
+
+	if ($json) {
+		return($json);
+	}
+}
+
+
+# return address & value of a transparent output
+#
+sub get_output {
+
+	my ($txid, $output) = @_;
+	#print "\n$txid\n";
+	#print "$output\n";
+	my $txn_decoded = node_cli("getrawtransaction $txid 1");                    # get decoded transaction as JSON
+	#my $txn_raw = `$node_client getrawtransaction $txid`;				# not a JSON response, raw hexstring
+	#my $txn_decoded = node_cli("decoderawtransaction $txn_raw");			# decode hexstring transaction
+	#print "$txn_decoded->{'vout'}[$output]->{'scriptPubKey'}->{'addresses'}[0]\n";
+	#print "$txn_decoded->{'vout'}[$output]->{'value'}\n";
+	return ($txn_decoded->{'vout'}[$output]->{'scriptPubKey'}->{'addresses'}[0], $txn_decoded->{'vout'}[$output]->{'value'});
+}
+
+
+sub get_p2sh {
+	my ($hex) = @_;
+	my $output = node_cli("decodescript $hex");
+	#print "running p2sh\n";
+	#print "$output->{'p2sh'}\n";
+	return ($output->{'p2sh'});
+}
+
+
